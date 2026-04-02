@@ -46,7 +46,6 @@ async function main() {
 
     const stream = await agent.stream(userInput, {
       requestContext,
-      requireToolApproval: true,
       memory: {
         thread: threadId,
         resource: resourceId,
