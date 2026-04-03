@@ -9,7 +9,7 @@ export async function POST(req: Request) {
   const logInput = { platform, productId, pickup, destination, fareId }
 
   if (action === "decline") {
-    actionLog.append({
+    await actionLog.append({
       type: "ride.booking_declined",
       tool: "bookRide",
       input: logInput,

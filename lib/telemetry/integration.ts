@@ -16,7 +16,7 @@ class LLMTelemetryIntegration implements TelemetryIntegration {
     metadata?: Record<string, unknown>
   }) {
     this.startTime = Date.now()
-    telemetryStore.append({
+    await telemetryStore.append({
       type: "llm.start",
       model: event.model.modelId,
       provider: event.model.provider,
@@ -36,7 +36,7 @@ class LLMTelemetryIntegration implements TelemetryIntegration {
     stepNumber: number
     model: { provider: string; modelId: string }
   }) {
-    telemetryStore.append({
+    await telemetryStore.append({
       type: "llm.step_start",
       stepNumber: event.stepNumber,
       model: event.model.modelId,
@@ -59,7 +59,7 @@ class LLMTelemetryIntegration implements TelemetryIntegration {
       }
     }
   }) {
-    telemetryStore.append({
+    await telemetryStore.append({
       type: "llm.step_finish",
       stepNumber: event.stepNumber,
       model: event.model.modelId,
@@ -86,7 +86,7 @@ class LLMTelemetryIntegration implements TelemetryIntegration {
     functionId?: string
     metadata?: Record<string, unknown>
   }) {
-    telemetryStore.append({
+    await telemetryStore.append({
       type: "llm.finish",
       model: event.model.modelId,
       provider: event.model.provider,

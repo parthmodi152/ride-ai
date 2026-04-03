@@ -16,7 +16,7 @@ class ActionLogIntegration implements TelemetryIntegration {
   async onToolCallStart(event: {
     toolCall: { toolName: string; input: unknown }
   }) {
-    actionLog.append({
+    await actionLog.append({
       type: "tool.start",
       tool: event.toolCall.toolName,
       input: event.toolCall.input,
@@ -39,7 +39,7 @@ class ActionLogIntegration implements TelemetryIntegration {
         }
   ) {
     if (event.success) {
-      actionLog.append({
+      await actionLog.append({
         type: "tool.finish",
         tool: event.toolCall.toolName,
         input: event.toolCall.input,
@@ -47,7 +47,7 @@ class ActionLogIntegration implements TelemetryIntegration {
         durationMs: event.durationMs,
       })
     } else {
-      actionLog.append({
+      await actionLog.append({
         type: "tool.error",
         tool: event.toolCall.toolName,
         input: event.toolCall.input,
@@ -69,7 +69,7 @@ class ActionLogIntegration implements TelemetryIntegration {
       // execution depends on user confirmation via the client.
       // onToolCallStart/Finish never fire for these, so we log here.
       if (tool && !tool.execute) {
-        actionLog.append({
+        await actionLog.append({
           type: "tool.requested",
           tool: toolCall.toolName,
           input: toolCall.input,

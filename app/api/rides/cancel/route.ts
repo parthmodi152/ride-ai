@@ -7,7 +7,7 @@ export async function POST(req: Request) {
   const logInput = { platform, tripId }
 
   if (action === "decline") {
-    actionLog.append({
+    await actionLog.append({
       type: "ride.cancel_declined",
       tool: "cancelRide",
       input: logInput,
