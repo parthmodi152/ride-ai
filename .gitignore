@@ -1,6 +1,25 @@
+# Dependencies
 node_modules/
-dist/
+
+# Next.js
+.next/
+next.user-config.*
+
+# Environment
 .env
-mastra.db
-.mastra/
+.env*.local
+
+# IDE / OS
 .DS_Store
+.vscode/
+
+# Claude Code / MCP
+.claude/
+.agents/
+.mcp.json
+
+# Vercel
+.vercel/
+
+# Build
+tsconfig.tsbuildinfo
