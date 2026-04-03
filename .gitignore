@@ -22,4 +22,4 @@ next.user-config.*
 .vercel/
 
 # Build
-tsconfig.tsbuildinfo
+tsconfig.tsbuildinfoopenapi.json
