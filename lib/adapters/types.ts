@@ -7,10 +7,30 @@ export interface Location {
 export interface ProductEstimate {
   productId: string
   name: string
-  estimate: string
+  description: string
+  shortDescription: string
+  capacity: number
+  productGroup: "economy" | "comfort" | "premium"
+  image?: string
+  shared: boolean
+
+  // Pricing
   fareId: string
+  fareValue: number
+  fareDisplay: string
+  currencyCode: string
+  fareExpiresAt: number // Unix timestamp — fare valid for ~2 minutes
+
+  // Surge
   surgeMultiplier: number
+
+  // Time & distance estimates
   etaMinutes: number
+  durationMinutes: number
+  distanceMiles: number
+
+  // Availability
+  noCarsAvailable: boolean
 }
 
 export interface EstimateResult {
@@ -21,25 +41,60 @@ export interface BookingResult {
   tripId: string
   status: string
   estimatedPickupMinutes: number
+  surgeMultiplier: number
+  driver: {
+    name: string
+    rating: number
+    phoneNumber: string
+  }
+  vehicle: {
+    make: string
+    model: string
+    color: string
+    licensePlate: string
+  }
 }
+
+export type TripStatusCode =
+  | "processing"
+  | "no_drivers_available"
+  | "accepted"
+  | "arriving"
+  | "in_progress"
+  | "driver_canceled"
+  | "rider_canceled"
+  | "completed"
 
 export interface TripStatus {
   tripId: string
-  status:
-    | "PROCESSING"
-    | "ACCEPTED"
-    | "ARRIVING"
-    | "IN_PROGRESS"
-    | "COMPLETED"
-    | "CANCELLED"
-  driver?: { name: string; rating: number }
-  vehicle?: { make: string; model: string; licensePlate: string }
+  status: TripStatusCode
+  driver?: {
+    name: string
+    rating: number
+    phoneNumber: string
+  }
+  vehicle?: {
+    make: string
+    model: string
+    color: string
+    licensePlate: string
+  }
+  location?: {
+    lat: number
+    lng: number
+    bearing: number
+  }
   estimatedArrivalMinutes?: number
+  surgeMultiplier?: number
+  fare?: {
+    value: number
+    currencyCode: string
+  }
 }
 
 export interface CancelResult {
   tripId: string
-  cancelled: boolean
+  status: "rider_canceled"
   cancellationFee?: number
 }
 

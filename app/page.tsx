@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, useMemo, useRef } from "react"
 import { useChat } from "@ai-sdk/react"
 import {
   DefaultChatTransport,
@@ -11,20 +11,39 @@ import { ChatPanel } from "@/components/chat-panel"
 import { RideOptionsPanel } from "@/components/ride-options-panel"
 import { ActiveRideTracker } from "@/components/active-ride-tracker"
 import { ActivityLog } from "@/components/activity-log"
+import { TripHistory } from "@/components/trip-history"
 import { TelemetryConsole } from "@/components/telemetry-console"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { RideAgentMessage } from "@/app/api/chat/route"
 import type { Booking, RideOption } from "@/lib/types"
 
 const PLATFORM = "uber-mock"
+const FALLBACK_LOCATION = {
+  address: "Empire State Building, New York, NY",
+  lat: 40.7484,
+  lng: -73.9857,
+}
 
 export default function Home() {
   const [currentBooking, setCurrentBooking] = useState<Booking | null>(null)
-  const [selectedRideContext, setSelectedRideContext] = useState<{
-    pickup: string
-    destination: string
-    rideOptions: RideOption[]
-  } | null>(null)
+  const [userLocation, setUserLocation] = useState(FALLBACK_LOCATION)
+
+  useEffect(() => {
+    if (!navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords
+        try {
+          const res = await fetch(`/api/geocode?lat=${latitude}&lng=${longitude}`)
+          const data = await res.json()
+          setUserLocation({ address: data.address, lat: latitude, lng: longitude })
+        } catch {
+          setUserLocation({ address: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`, lat: latitude, lng: longitude })
+        }
+      },
+      () => {} // denied or error, keep fallback
+    )
+  }, [])
 
   const [pendingBooking, setPendingBooking] = useState<{
     toolCallId: string
@@ -33,22 +52,29 @@ export default function Home() {
     price: number
     pickup: string
     destination: string
-    eta: string
     fareId?: string
   } | null>(null)
 
   const [pendingCancel, setPendingCancel] = useState<{
     toolCallId: string
     bookingId: string
-    rideName: string
   } | null>(null)
+
+  const userLocationRef = useRef(userLocation)
+  userLocationRef.current = userLocation
+
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        api: "/api/chat",
+        body: () => ({ platform: PLATFORM, userLocation: userLocationRef.current }),
+      }),
+    []
+  )
 
   const { messages, sendMessage, status, addToolOutput } =
     useChat<RideAgentMessage>({
-      transport: new DefaultChatTransport({
-        api: "/api/chat",
-        body: { platform: PLATFORM },
-      }),
+      transport,
       sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
 
       onToolCall({ toolCall }) {
@@ -61,17 +87,13 @@ export default function Home() {
             price: number
             pickup: string
             destination: string
-            eta: string
             fareId?: string
           }
           setPendingBooking({ toolCallId: toolCall.toolCallId, ...input })
         }
 
         if (toolCall.toolName === "cancelRide") {
-          const input = toolCall.input as {
-            bookingId: string
-            rideName: string
-          }
+          const input = toolCall.input as { bookingId: string }
           setPendingCancel({ toolCallId: toolCall.toolCallId, ...input })
         }
       },
@@ -95,24 +117,41 @@ export default function Home() {
     })
     const bookingResult = await res.json()
 
+    if (!res.ok) {
+      addToolOutput({
+        tool: "bookRide",
+        toolCallId: pendingBooking.toolCallId,
+        output: {
+          state: "error",
+          message: bookingResult.message ?? "Booking failed",
+        },
+      })
+      setPendingBooking(null)
+      return
+    }
+
+    const driverInfo = bookingResult.driver
+    const vehicleInfo = bookingResult.vehicle
+
     const booking: Booking = {
       id: bookingResult.tripId,
       rideName: pendingBooking.rideName,
       price: pendingBooking.price,
       pickup: pendingBooking.pickup,
       destination: pendingBooking.destination,
-      driver: bookingResult.driver ?? {
-        name: "Finding driver...",
-        rating: 0,
-        car: "Assigning vehicle",
-        plate: "---",
+      driver: {
+        name: driverInfo?.name ?? "Finding driver...",
+        rating: driverInfo?.rating ?? 0,
+        car: vehicleInfo
+          ? `${vehicleInfo.color} ${vehicleInfo.make} ${vehicleInfo.model}`
+          : "Assigning vehicle",
+        plate: vehicleInfo?.licensePlate ?? "---",
       },
       eta: `${bookingResult.estimatedPickupMinutes} min`,
-      status: "arriving",
+      status: (bookingResult.status ?? "processing") as Booking["status"],
     }
 
     setCurrentBooking(booking)
-    setSelectedRideContext(null)
 
     addToolOutput({
       tool: "bookRide",
@@ -166,6 +205,19 @@ export default function Home() {
     })
     const cancelResult = await res.json()
 
+    if (!res.ok) {
+      addToolOutput({
+        tool: "cancelRide",
+        toolCallId: pendingCancel.toolCallId,
+        output: {
+          state: "error",
+          message: cancelResult.message ?? "Cancellation failed",
+        },
+      })
+      setPendingCancel(null)
+      return
+    }
+
     setCurrentBooking(null)
 
     const feeMessage = cancelResult.cancellationFee
@@ -208,35 +260,29 @@ export default function Home() {
     setPendingCancel(null)
   }, [pendingCancel, addToolOutput])
 
-  // Extract the latest ride data from tool outputs
-  const latestRideData = extractLatestRideData(messages)
-
-  // Update selected ride context for the panel
-  if (
-    latestRideData.rideSearch &&
-    (!selectedRideContext ||
-      selectedRideContext.destination !== latestRideData.rideSearch.destination)
-  ) {
-    setSelectedRideContext(latestRideData.rideSearch)
-  }
+  // Derive ride context from messages — always fresh, no stale state
+  const selectedRideContext = extractLatestRideData(messages).rideSearch
 
   const handleCancelRide = () => {
     if (currentBooking) {
-      sendMessage({ text: `Cancel my ride ${currentBooking.id}` })
+      sendMessage({
+        text: `Cancel my ${currentBooking.rideName} ride (booking ID: ${currentBooking.id})`,
+      })
     }
   }
 
-  const handleSelectRide = (rideId: string) => {
+  const handleSelectRide = (rideId: string, rideName: string) => {
     if (selectedRideContext) {
+      const ride = selectedRideContext.rideOptions.find((r) => r.id === rideId)
       sendMessage({
-        text: `Book the ${rideId} option from ${selectedRideContext.pickup} to ${selectedRideContext.destination}`,
+        text: `Book ${rideName} (product ID: ${rideId}, fare ID: ${ride?.fareId ?? "unknown"}, price: $${ride?.price.toFixed(2) ?? "?"}) from ${selectedRideContext.pickup} to ${selectedRideContext.destination}`,
       })
     }
   }
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
-      <Header />
+      <Header userLocation={userLocation} />
       <main className="flex flex-1 flex-col overflow-hidden lg:flex-row">
         <ChatPanel
           messages={messages}
@@ -253,13 +299,16 @@ export default function Home() {
           <Tabs defaultValue="rides" className="flex flex-1 flex-col overflow-hidden">
             <TabsList className="mx-4 mt-3 shrink-0">
               <TabsTrigger value="rides">Rides</TabsTrigger>
+              <TabsTrigger value="history">History</TabsTrigger>
               <TabsTrigger value="log">Activity Log</TabsTrigger>
             </TabsList>
             <TabsContent value="rides" className="flex-1 overflow-hidden">
               {currentBooking ? (
                 <ActiveRideTracker
                   booking={currentBooking}
+                  platform={PLATFORM}
                   onCancel={handleCancelRide}
+                  onDismiss={() => setCurrentBooking(null)}
                 />
               ) : (
                 <RideOptionsPanel
@@ -269,7 +318,10 @@ export default function Home() {
                 />
               )}
             </TabsContent>
-            <TabsContent value="log" className="flex-1 overflow-hidden">
+            <TabsContent value="history" className="flex-1 overflow-hidden">
+              <TripHistory />
+            </TabsContent>
+            <TabsContent value="log" className="flex flex-col flex-1 overflow-hidden">
               <ActivityLog />
             </TabsContent>
           </Tabs>
@@ -285,6 +337,7 @@ function extractLatestRideData(messages: RideAgentMessage[]) {
     pickup: string
     destination: string
     rideOptions: RideOption[]
+    fareExpiresAt?: number
   } | null = null
 
   for (const message of messages) {
@@ -300,12 +353,14 @@ function extractLatestRideData(messages: RideAgentMessage[]) {
           pickup?: string
           destination?: string
           rideOptions?: RideOption[]
+          fareExpiresAt?: number
         }
         if (output.state === "ready" && output.rideOptions) {
           rideSearch = {
             pickup: output.pickup || "Current Location",
             destination: output.destination || "",
             rideOptions: output.rideOptions,
+            fareExpiresAt: output.fareExpiresAt,
           }
         }
       }

@@ -1,20 +1,8 @@
-import { Redis } from "@upstash/redis"
+import { getRedis } from "@/lib/redis"
 import type { ActionEntry, ActionType } from "./types"
 
 const REDIS_KEY = "ride-ai:action-log"
-
-function getRedis(): Redis | null {
-  if (
-    (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL) &&
-    (process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN)
-  ) {
-    return new Redis({
-      url: (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL)!,
-      token: (process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN)!,
-    })
-  }
-  return null
-}
+const LOG_TTL_SEC = 3600 // 1 hour
 
 // In-memory fallback for local dev without Redis
 const memoryEntries: ActionEntry[] = []
@@ -43,6 +31,7 @@ export const actionLog = {
     const redis = getRedis()
     if (redis) {
       await redis.rpush(REDIS_KEY, JSON.stringify(full))
+      await redis.expire(REDIS_KEY, LOG_TTL_SEC)
     } else {
       memoryEntries.push(full)
     }

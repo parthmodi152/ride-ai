@@ -16,14 +16,32 @@ export async function POST(req: Request) {
   }
 
   const adapter = getAdapter(platform)
-  const result = await adapter.cancelRide({ tripId })
 
-  actionLog.append({
-    type: "ride.cancelled",
-    tool: "cancelRide",
-    input: logInput,
-    output: result,
-  })
+  try {
+    const result = await adapter.cancelRide({ tripId })
 
-  return Response.json(result)
+    await actionLog.append({
+      type: "ride.cancelled",
+      tool: "cancelRide",
+      input: logInput,
+      output: result,
+    })
+
+    return Response.json(result)
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Cancellation failed"
+
+    await actionLog.append({
+      type: "ride.cancel_declined",
+      tool: "cancelRide",
+      input: logInput,
+      error: message,
+    })
+
+    return Response.json(
+      { error: "cancel_failed", message },
+      { status: 422 }
+    )
+  }
 }

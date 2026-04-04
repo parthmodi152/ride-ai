@@ -1,20 +1,8 @@
-import { Redis } from "@upstash/redis"
+import { getRedis } from "@/lib/redis"
 import type { TelemetryEntry, TelemetryEventType } from "./types"
 
 const REDIS_KEY = "ride-ai:telemetry"
-
-function getRedis(): Redis | null {
-  if (
-    (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL) &&
-    (process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN)
-  ) {
-    return new Redis({
-      url: (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL)!,
-      token: (process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN)!,
-    })
-  }
-  return null
-}
+const TELEMETRY_TTL_SEC = 3600 // 1 hour
 
 const memoryEntries: TelemetryEntry[] = []
 
@@ -42,6 +30,7 @@ export const telemetryStore = {
     const redis = getRedis()
     if (redis) {
       await redis.rpush(REDIS_KEY, JSON.stringify(full))
+      await redis.expire(REDIS_KEY, TELEMETRY_TTL_SEC)
     } else {
       memoryEntries.push(full)
     }

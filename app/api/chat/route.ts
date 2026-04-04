@@ -18,9 +18,12 @@ export const maxDuration = 30
 export async function POST(req: Request) {
   const body = await req.json()
   const platform: string = body.platform ?? "uber-mock"
+  const userLocation = body.userLocation as
+    | { address: string; lat: number; lng: number }
+    | undefined
 
   const adapter = getAdapter(platform)
-  const tools = createRideTools(adapter)
+  const tools = createRideTools(adapter, { userLocation })
 
   const messages = await validateUIMessages<
     UIMessage<never, UIDataTypes, InferUITools<typeof tools>>
@@ -42,7 +45,7 @@ When a user wants to go somewhere:
 
 Be conversational, friendly, and concise. When presenting ride options, briefly mention the best value and the premium option.
 
-If the user provides just a destination without a pickup location, assume "Current Location" as the pickup.`,
+If the user provides just a destination without a pickup location, use their current location as the default pickup.`,
     messages: await convertToModelMessages(messages),
     stopWhen: stepCountIs(5),
     tools,

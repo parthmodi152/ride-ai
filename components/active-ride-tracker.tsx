@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -22,46 +22,85 @@ import type { Booking } from "@/lib/types"
 
 interface ActiveRideTrackerProps {
   booking: Booking
+  platform?: string
   onCancel: () => void
+  onDismiss: () => void
 }
 
 const statusLabels: Record<string, string> = {
+  processing: "Finding your driver...",
+  accepted: "Driver assigned",
   arriving: "Driver is on the way",
-  arrived: "Driver has arrived",
   in_progress: "Trip in progress",
   completed: "Trip completed",
+  rider_canceled: "Ride cancelled",
+  driver_canceled: "Driver cancelled",
+  no_drivers_available: "No drivers available",
 }
 
 const statusProgress: Record<string, number> = {
-  arriving: 25,
-  arrived: 50,
+  processing: 10,
+  accepted: 25,
+  arriving: 50,
   in_progress: 75,
   completed: 100,
+  rider_canceled: 0,
+  driver_canceled: 0,
+  no_drivers_available: 0,
 }
 
-export function ActiveRideTracker({ booking, onCancel }: ActiveRideTrackerProps) {
-  const [progress, setProgress] = useState(statusProgress[booking.status])
-  const [currentStatus, setCurrentStatus] = useState(booking.status)
+const TERMINAL_STATUSES = ["completed", "rider_canceled", "driver_canceled"]
+const CANCELLABLE_STATUSES = ["processing", "accepted", "arriving"]
 
-  // Simulate ride progress
+export function ActiveRideTracker({
+  booking,
+  platform = "uber-mock",
+  onCancel,
+  onDismiss,
+}: ActiveRideTrackerProps) {
+  const [currentStatus, setCurrentStatus] = useState<string>(booking.status)
+  const [eta, setEta] = useState(booking.eta)
+  const [progress, setProgress] = useState(statusProgress[booking.status] ?? 25)
+
+  const isTerminal = TERMINAL_STATUSES.includes(currentStatus)
+  const canCancel = CANCELLABLE_STATUSES.includes(currentStatus)
+  const isTerminalRef = useRef(isTerminal)
+
   useEffect(() => {
-    const statuses: Array<"arriving" | "arrived" | "in_progress" | "completed"> = [
-      "arriving",
-      "arrived",
-      "in_progress",
-    ]
-    let currentIndex = statuses.indexOf(currentStatus as "arriving" | "arrived" | "in_progress")
+    isTerminalRef.current = isTerminal
+  }, [isTerminal])
 
-    const interval = setInterval(() => {
-      if (currentIndex < statuses.length - 1) {
-        currentIndex++
-        setCurrentStatus(statuses[currentIndex])
-        setProgress(statusProgress[statuses[currentIndex]])
+  const pollStatus = useCallback(async () => {
+    if (isTerminalRef.current) return
+
+    try {
+      const res = await fetch(
+        `/api/rides/track?tripId=${booking.id}&platform=${platform}`
+      )
+      if (!res.ok) return
+
+      const data = await res.json()
+      const status = data.status as string
+
+      setCurrentStatus(status)
+      setProgress(statusProgress[status] ?? 0)
+
+      if (data.estimatedArrivalMinutes != null) {
+        setEta(`${data.estimatedArrivalMinutes} min`)
+      } else {
+        setEta(statusLabels[status] ?? status)
       }
-    }, 10000)
+    } catch {
+      // Silently retry on next interval
+    }
+  }, [booking.id, platform])
 
+  useEffect(() => {
+    pollStatus()
+
+    const interval = setInterval(pollStatus, 3000)
     return () => clearInterval(interval)
-  }, [currentStatus])
+  }, [pollStatus])
 
   return (
     <div className="flex h-full flex-col">
@@ -70,20 +109,14 @@ export function ActiveRideTracker({ booking, onCancel }: ActiveRideTrackerProps)
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-center">
             <Navigation className="mx-auto h-12 w-12 text-muted-foreground/50" />
-            <p className="mt-2 text-sm text-muted-foreground">Live tracking map</p>
+            <p className="mt-2 text-sm text-muted-foreground">Live tracking</p>
           </div>
         </div>
         <div className="absolute bottom-4 left-4 right-4">
           <Card className="px-3 py-2">
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-medium">
-                {currentStatus === "arriving"
-                  ? `Driver arrives in ${booking.eta}`
-                  : currentStatus === "arrived"
-                    ? "Your driver has arrived"
-                    : "Trip in progress"}
-              </span>
+              <span className="text-sm font-medium">{eta}</span>
             </div>
           </Card>
         </div>
@@ -93,10 +126,10 @@ export function ActiveRideTracker({ booking, onCancel }: ActiveRideTrackerProps)
       <div className="border-b border-border p-4">
         <div className="mb-3 flex items-center justify-between">
           <Badge
-            variant={currentStatus === "arrived" ? "default" : "secondary"}
+            variant={isTerminal ? "secondary" : "default"}
             className="text-xs"
           >
-            {statusLabels[currentStatus]}
+            {statusLabels[currentStatus] ?? currentStatus}
           </Badge>
           <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs">
             <Share2 className="h-3.5 w-3.5" />
@@ -183,31 +216,37 @@ export function ActiveRideTracker({ booking, onCancel }: ActiveRideTrackerProps)
         </Card>
       </div>
 
-      {/* Cancel Button */}
+      {/* Footer actions based on trip state */}
       <div className="border-t border-border p-4">
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button variant="outline" className="w-full text-destructive hover:text-destructive">
-              Cancel Ride
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Cancel this ride?</AlertDialogTitle>
-              <AlertDialogDescription>
-                {currentStatus === "arriving"
-                  ? "No cancellation fee will be charged since the driver hasn't arrived yet."
-                  : "A cancellation fee may apply since the driver has already arrived."}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Keep ride</AlertDialogCancel>
-              <AlertDialogAction onClick={onCancel} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                Cancel ride
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        {isTerminal ? (
+          <Button className="w-full" onClick={onDismiss}>
+            Book Another Ride
+          </Button>
+        ) : canCancel ? (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" className="w-full text-destructive hover:text-destructive">
+                Cancel Ride
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Cancel this ride?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {currentStatus === "arriving"
+                    ? "A cancellation fee of $2.50 may apply since the driver is on the way."
+                    : "No cancellation fee will be charged."}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Keep ride</AlertDialogCancel>
+                <AlertDialogAction onClick={onCancel} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  Cancel ride
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : null}
       </div>
     </div>
   )

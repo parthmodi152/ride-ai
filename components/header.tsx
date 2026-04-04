@@ -8,9 +8,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Car, History, Settings, User, HelpCircle } from "lucide-react"
+import { Car, History, Settings, User, MapPin } from "lucide-react"
 
-export function Header() {
+interface HeaderProps {
+  userLocation?: { address: string }
+}
+
+export function Header({ userLocation }: HeaderProps) {
   return (
     <header className="flex h-16 items-center justify-between border-b border-border bg-card px-4 md:px-6">
       <div className="flex items-center gap-3">
@@ -18,18 +22,15 @@ export function Header() {
           <Car className="h-5 w-5 text-primary-foreground" />
         </div>
         <span className="text-xl font-semibold tracking-tight">RideAI</span>
+        {userLocation && (
+          <div className="hidden items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground md:flex">
+            <MapPin className="h-3 w-3" />
+            <span>{userLocation.address}</span>
+          </div>
+        )}
       </div>
-      
-      <nav className="hidden items-center gap-1 md:flex">
-        <Button variant="ghost" size="sm" className="gap-2">
-          <History className="h-4 w-4" />
-          Trip History
-        </Button>
-        <Button variant="ghost" size="sm" className="gap-2">
-          <HelpCircle className="h-4 w-4" />
-          Help
-        </Button>
-      </nav>
+
+      <nav className="hidden items-center gap-1 md:flex" />
 
       <div className="flex items-center gap-2">
         <DropdownMenu>

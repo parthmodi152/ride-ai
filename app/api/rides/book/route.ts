@@ -19,19 +19,36 @@ export async function POST(req: Request) {
 
   const adapter = getAdapter(platform)
 
-  const result = await adapter.bookRide({
-    productId,
-    pickup: addressToLocation(pickup),
-    dropoff: addressToLocation(destination),
-    fareId,
-  })
+  try {
+    const result = await adapter.bookRide({
+      productId,
+      pickup: await addressToLocation(pickup),
+      dropoff: await addressToLocation(destination),
+      fareId,
+    })
 
-  actionLog.append({
-    type: "ride.booked",
-    tool: "bookRide",
-    input: logInput,
-    output: result,
-  })
+    await actionLog.append({
+      type: "ride.booked",
+      tool: "bookRide",
+      input: logInput,
+      output: result,
+    })
 
-  return Response.json(result)
+    return Response.json(result)
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Booking failed"
+
+    await actionLog.append({
+      type: "ride.booking_declined",
+      tool: "bookRide",
+      input: logInput,
+      error: message,
+    })
+
+    return Response.json(
+      { error: "booking_failed", message },
+      { status: 422 }
+    )
+  }
 }

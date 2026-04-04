@@ -1,8 +1,8 @@
 import type { PlatformAdapter } from "./types"
-import { MockUberAdapter } from "./uber-mock"
+import { UberAdapter } from "./uber-adapter"
 
 const adapters: Record<string, PlatformAdapter> = {
-  "uber-mock": new MockUberAdapter(),
+  "uber-mock": new UberAdapter(),
 }
 
 export function getAdapter(platform?: string): PlatformAdapter {

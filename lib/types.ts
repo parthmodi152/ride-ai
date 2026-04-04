@@ -5,8 +5,13 @@ export interface RideOption {
   price: number
   eta: string
   duration: string
+  distance?: string
   capacity: number
-  type: "economy" | "comfort" | "premium"
+  type: string
+  surgeMultiplier?: number
+  fareId?: string
+  fareDisplay?: string
+  noCarsAvailable?: boolean
 }
 
 export interface Driver {
@@ -14,6 +19,7 @@ export interface Driver {
   rating: number
   car: string
   plate: string
+  phone?: string
   photo?: string
   location?: { lat: number; lng: number }
 }
@@ -26,14 +32,14 @@ export interface Booking {
   destination: string
   driver: Omit<Driver, "photo" | "location">
   eta: string
-  status: "arriving" | "arrived" | "in_progress" | "completed"
+  status: "processing" | "accepted" | "arriving" | "in_progress" | "completed" | "rider_canceled" | "driver_canceled"
 }
 
 export interface ActiveRide {
   id: string
   option: RideOption
   driver: Driver
-  status: "arriving" | "arrived" | "in_progress" | "completed"
+  status: "processing" | "accepted" | "arriving" | "in_progress" | "completed" | "rider_canceled" | "driver_canceled"
   pickup: string
   destination: string
   eta: string

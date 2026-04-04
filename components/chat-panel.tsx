@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useLayoutEffect } from "react"
+import { useState, useRef, useEffect, useLayoutEffect } from "react"
 import Markdown from "react-markdown"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -21,8 +21,11 @@ import {
   Loader2,
   AlertTriangle,
   User,
+  Zap,
+  Download,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { exportTranscript } from "@/lib/export-transcript"
 import type { RideAgentMessage } from "@/app/api/chat/route"
 import type { RideOption } from "@/lib/types"
 
@@ -41,12 +44,11 @@ interface ChatPanelProps {
     price: number
     pickup: string
     destination: string
-    eta: string
+    fareId?: string
   } | null
   pendingCancel: {
     toolCallId: string
     bookingId: string
-    rideName: string
   } | null
   onConfirmBooking: () => void
   onDeclineBooking: () => void
@@ -251,6 +253,18 @@ export function ChatPanel({
               <Send className="h-4 w-4" />
               <span className="sr-only">Send message</span>
             </Button>
+            {messages.length > 0 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="shrink-0 rounded-full"
+                onClick={() => exportTranscript(messages)}
+              >
+                <Download className="h-4 w-4" />
+                <span className="sr-only">Export transcript</span>
+              </Button>
+            )}
           </form>
         </div>
       </div>
@@ -269,7 +283,6 @@ function BookingConfirmationUI({
     price: number
     pickup: string
     destination: string
-    eta: string
   }
   onConfirm: () => void
   onDecline: () => void
@@ -291,10 +304,6 @@ function BookingConfirmationUI({
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Price</span>
             <span className="font-bold text-lg">${booking.price.toFixed(2)}</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Pickup ETA</span>
-            <span className="text-sm">{booking.eta}</span>
           </div>
         </div>
         
@@ -345,7 +354,6 @@ function CancelConfirmationUI({
 }: {
   cancel: {
     bookingId: string
-    rideName: string
   }
   onConfirm: () => void
   onDecline: () => void
@@ -360,7 +368,7 @@ function CancelConfirmationUI({
       </div>
       <div className="p-4 space-y-4">
         <p className="text-sm text-muted-foreground">
-          Are you sure you want to cancel your <span className="font-medium text-foreground">{cancel.rideName}</span> ride? 
+          Are you sure you want to cancel your ride?
           Cancellation fees may apply if the driver is already on the way.
         </p>
         
@@ -421,6 +429,24 @@ function SearchRidesUI({ part }: { part: ToolPart<"tool-searchRides"> }) {
     pickup?: string
     destination?: string
     rideOptions?: RideOption[]
+    fareExpiresAt?: number
+    message?: string
+  }
+
+  if (output.state === "error") {
+    return (
+      <Card className="mx-auto max-w-md p-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-destructive/10">
+            <AlertTriangle className="h-4 w-4 text-destructive" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold">Location Not Found</p>
+            <p className="text-xs text-muted-foreground">{output.message ?? "Could not find the specified location."}</p>
+          </div>
+        </div>
+      </Card>
+    )
   }
 
   if (output.state === "searching") {
@@ -448,6 +474,14 @@ function SearchRidesUI({ part }: { part: ToolPart<"tool-searchRides"> }) {
           </div>
         </div>
 
+        {/* Surge warning */}
+        {output.rideOptions.some((r: { surgeMultiplier?: number }) => (r.surgeMultiplier ?? 1) > 1) && (
+          <div className="flex items-center gap-2 bg-amber-50 px-4 py-2 text-xs text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
+            <Zap className="h-3.5 w-3.5 shrink-0" />
+            <span>Surge pricing is active. Fares are higher than usual.</span>
+          </div>
+        )}
+
         {/* Ride list — fully visible, no scroll cap */}
         <div className="divide-y divide-border">
           {output.rideOptions.map((ride, i) => (
@@ -455,7 +489,8 @@ function SearchRidesUI({ part }: { part: ToolPart<"tool-searchRides"> }) {
               key={ride.id}
               className={cn(
                 "flex items-center gap-3 px-4 py-4",
-                i === 0 && "bg-muted/30"
+                i === 0 && !ride.noCarsAvailable && "bg-muted/30",
+                ride.noCarsAvailable && "opacity-50"
               )}
             >
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-card">
@@ -464,42 +499,64 @@ function SearchRidesUI({ part }: { part: ToolPart<"tool-searchRides"> }) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="text-sm font-semibold">{ride.name}</span>
-                  {i === 0 && (
-                    <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground">
-                      Best value
+                  {ride.noCarsAvailable ? (
+                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      Unavailable
                     </span>
-                  )}
-                  {ride.type === "premium" && (
-                    <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-                      Premium
-                    </span>
+                  ) : (
+                    <>
+                      {i === 0 && (
+                        <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground">
+                          Best value
+                        </span>
+                      )}
+                      {ride.type === "premium" && (
+                        <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                          Premium
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
                 <p className="mt-1 truncate text-xs text-muted-foreground">{ride.description}</p>
-                <div className="mt-1.5 flex items-center gap-2.5 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    {ride.eta}
-                  </span>
-                  <span className="text-border">·</span>
-                  <span className="flex items-center gap-1">
-                    <Users className="h-3 w-3" />
-                    Up to {ride.capacity}
-                  </span>
-                  <span className="text-border">·</span>
-                  <span>{ride.duration}</span>
-                </div>
+                {!ride.noCarsAvailable && (
+                  <div className="mt-1.5 flex items-center gap-2.5 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      {ride.eta}
+                    </span>
+                    <span className="text-border">·</span>
+                    <span className="flex items-center gap-1">
+                      <Users className="h-3 w-3" />
+                      Up to {ride.capacity}
+                    </span>
+                    <span className="text-border">·</span>
+                    <span>{ride.duration}</span>
+                  </div>
+                )}
               </div>
-              <span className="shrink-0 text-base font-bold">${ride.price.toFixed(2)}</span>
+              <div className="shrink-0 text-right">
+                <span className={cn("text-base font-bold", ride.noCarsAvailable && "line-through text-muted-foreground")}>${ride.price.toFixed(2)}</span>
+                {!ride.noCarsAvailable && (ride.surgeMultiplier ?? 1) > 1 && (
+                  <div className="mt-0.5 flex items-center justify-end gap-0.5 text-[10px] font-medium text-amber-600">
+                    <Zap className="h-3 w-3" />
+                    {ride.surgeMultiplier}x surge
+                  </div>
+                )}
+              </div>
             </div>
           ))}
         </div>
 
-        <div className="border-t border-border bg-muted/30 px-4 py-2.5">
-          <p className="text-xs text-muted-foreground">
-            Tell me which ride you&apos;d like to book.
-          </p>
-        </div>
+        {output.fareExpiresAt ? (
+          <FareCountdown expiresAt={output.fareExpiresAt} />
+        ) : (
+          <div className="border-t border-border bg-muted/30 px-4 py-2.5">
+            <p className="text-xs text-muted-foreground">
+              Tell me which ride you&apos;d like to book.
+            </p>
+          </div>
+        )}
       </Card>
     )
   }
@@ -515,8 +572,24 @@ function BookRideUI({ part }: { part: ToolPart<"tool-bookRide"> }) {
   if (part.state !== "output-available") return null
   const output = part.output as {
     state: string
-    booking?: { id: string; rideName: string; price: number; pickup: string; destination: string; driver: { name: string; car: string; plate: string }; eta: string }
+    booking?: { id: string; rideName: string; price: number; pickup: string; destination: string; driver: { name: string; rating: number; car: string; plate: string }; eta: string }
     message?: string
+  }
+
+  if (output.state === "error") {
+    return (
+      <Card className="mx-auto max-w-md p-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-destructive/10">
+            <AlertTriangle className="h-4 w-4 text-destructive" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold">Booking Failed</p>
+            <p className="text-xs text-muted-foreground">{output.message ?? "Something went wrong. Please try again."}</p>
+          </div>
+        </div>
+      </Card>
+    )
   }
 
   if (output.state === "confirmed" && output.booking) {
@@ -594,6 +667,22 @@ function CancelRideUI({ part }: { part: ToolPart<"tool-cancelRide"> }) {
   if (part.state !== "output-available") return null
   const output = part.output as { state: string; message?: string }
 
+  if (output.state === "error") {
+    return (
+      <Card className="mx-auto max-w-md p-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-destructive/10">
+            <AlertTriangle className="h-4 w-4 text-destructive" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold">Cancellation Failed</p>
+            <p className="text-xs text-muted-foreground">{output.message ?? "Could not cancel the ride."}</p>
+          </div>
+        </div>
+      </Card>
+    )
+  }
+
   if (output.state === "cancelled") {
     return (
       <Card className="mx-auto max-w-md p-4">
@@ -645,11 +734,19 @@ function TrackRideUI({ part }: { part: ToolPart<"tool-trackRide"> }) {
 
   if (output.state === "ready") {
     const statusConfig: Record<string, { label: string; color: string }> = {
+      processing: { label: "Finding your driver...", color: "text-muted-foreground" },
+      accepted: { label: "Driver assigned", color: "text-blue-600" },
       arriving: { label: "Driver is on the way", color: "text-blue-600" },
-      arrived: { label: "Driver has arrived", color: "text-green-600" },
       in_progress: { label: "Trip in progress", color: "text-primary" },
+      completed: { label: "Trip completed", color: "text-green-600" },
+      rider_canceled: { label: "Ride cancelled", color: "text-destructive" },
+      driver_canceled: { label: "Driver cancelled", color: "text-destructive" },
+      no_drivers_available: { label: "No drivers available", color: "text-destructive" },
     }
-    const config = statusConfig[output.status ?? "arriving"]
+    const config = statusConfig[output.status ?? "processing"] ?? {
+      label: output.status ?? "Unknown",
+      color: "text-muted-foreground",
+    }
 
     return (
       <Card className="mx-auto max-w-md overflow-hidden">
@@ -672,4 +769,48 @@ function TrackRideUI({ part }: { part: ToolPart<"tool-trackRide"> }) {
   }
 
   return null
+}
+
+function FareCountdown({ expiresAt }: { expiresAt: number }) {
+  const [remaining, setRemaining] = useState(() =>
+    Math.max(0, Math.floor((expiresAt - Date.now()) / 1000))
+  )
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const secs = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000))
+      setRemaining(secs)
+      if (secs <= 0) clearInterval(interval)
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [expiresAt])
+
+  if (remaining <= 0) {
+    return (
+      <div className="flex items-center gap-2 border-t border-border bg-destructive/5 px-4 py-2.5 text-xs text-destructive">
+        <Clock className="h-3.5 w-3.5 shrink-0" />
+        <span>Prices expired. Ask for new estimates to get updated fares.</span>
+      </div>
+    )
+  }
+
+  const mins = Math.floor(remaining / 60)
+  const secs = remaining % 60
+  const isUrgent = remaining <= 30
+
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 border-t border-border px-4 py-2.5 text-xs",
+        isUrgent
+          ? "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400"
+          : "bg-muted/30 text-muted-foreground"
+      )}
+    >
+      <Clock className="h-3.5 w-3.5 shrink-0" />
+      <span>
+        Prices valid for {mins}:{secs.toString().padStart(2, "0")}
+      </span>
+    </div>
+  )
 }

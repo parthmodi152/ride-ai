@@ -95,11 +95,13 @@ function summarize(entry: ActionEntry): string {
 
     case "tool.finish":
       if (entry.tool === "searchRides" && output) {
-        const options = output.rideOptions as unknown[]
-        return `${options?.length ?? 0} options found · ${entry.durationMs}ms`
+        const options = output.rideOptions as unknown[] | undefined
+        return options?.length
+          ? `${options.length} options found · ${entry.durationMs}ms`
+          : `Completed · ${entry.durationMs}ms`
       }
       if (entry.tool === "trackRide" && output) {
-        return `${output.status} · ${output.eta}`
+        return [output.status, output.eta].filter(Boolean).join(" · ")
       }
       return entry.durationMs ? `${entry.durationMs}ms` : ""
 
@@ -140,28 +142,23 @@ function summarize(entry: ActionEntry): string {
   }
 }
 
-function downloadJson(data: unknown, filename: string) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
-}
+import { downloadJson } from "@/lib/download"
 
 export function ActivityLog() {
   const [entries, setEntries] = useState<ActionEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchLog = async () => {
       try {
         const res = await fetch("/api/rides/log")
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
         setEntries(data)
+        setError(null)
       } catch {
-        // Silently retry on next interval
+        setError("Failed to load activity log. Retrying...")
       } finally {
         setLoading(false)
       }
@@ -176,6 +173,16 @@ export function ActivityLog() {
     return (
       <div className="flex h-full items-center justify-center">
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (error && entries.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
+        <AlertTriangle className="h-8 w-8 text-destructive/50" />
+        <p className="text-sm font-medium text-destructive">{error}</p>
+        <p className="text-xs text-muted-foreground/70">Will retry automatically.</p>
       </div>
     )
   }
