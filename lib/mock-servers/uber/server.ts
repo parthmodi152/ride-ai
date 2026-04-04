@@ -145,11 +145,6 @@ const KNOWN_LOCATIONS: Record<string, UberCoordinates> = {
   hollywood: { latitude: 34.0928, longitude: -118.3287 },
 }
 
-// Service area center — used to bias Google Places results
-// In production, this would be dynamic based on the user's region
-const SERVICE_AREA = { latitude: 40.7484, longitude: -73.9857 } // NYC
-const MAX_SERVICE_RADIUS_MILES = 30 // Reject results beyond this distance
-
 async function geocodeWithGoogle(
   address: string
 ): Promise<UberCoordinates | null> {
@@ -167,27 +162,12 @@ async function geocodeWithGoogle(
           "X-Goog-FieldMask":
             "places.location,places.displayName,places.formattedAddress",
         },
-        body: JSON.stringify({
-          textQuery: address,
-          locationBias: {
-            circle: {
-              center: SERVICE_AREA,
-              radius: MAX_SERVICE_RADIUS_MILES * 1609.34, // miles to meters
-            },
-          },
-        }),
+        body: JSON.stringify({ textQuery: address }),
       }
     )
     const data = await res.json()
     const place = data.places?.[0]
     if (!place?.location) return null
-
-    // Verify result is within service area
-    const distance = haversineDistance(
-      SERVICE_AREA,
-      { latitude: place.location.latitude, longitude: place.location.longitude }
-    )
-    if (distance > MAX_SERVICE_RADIUS_MILES) return null
 
     return {
       latitude: place.location.latitude,
